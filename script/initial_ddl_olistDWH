@@ -1,1 +1,10 @@
+create database olist_DWH
+use olist_DWH
+GO
 
+--create schemas
+create schema bronze
+GO
+create schema silver
+GO
+create schema gold
