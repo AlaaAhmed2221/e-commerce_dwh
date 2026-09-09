@@ -114,7 +114,7 @@ product_category_name_translation varchar(100)
 
 
 
-
+	
 truncate table olist_customers
 BULK INSERT olist_customers
 		FROM "C:\Users\allal\Downloads\archive\olist_customers_dataset.csv"
@@ -142,7 +142,6 @@ BULK INSERT olist_geolocation
 			TABLOCK
 		);
 select * from olist_geolocation
-  
 
 truncate table olist_order_items
 BULK INSERT olist_order_items
@@ -172,6 +171,9 @@ BULK INSERT olist_order_payments
 select * from olist_order_payments
 
 
+
+
+
 BULK INSERT olist_order_reviews
 FROM 'C:\Users\allal\Downloads\archive\olist_order_reviews_dataset.csv'
 WITH
@@ -199,6 +201,21 @@ BULK INSERT olist_orders
 			TABLOCK
 		);
 select * from olist_orders
+
+	
+
+truncate table olist_products
+BULK INSERT olist_products
+		FROM "C:\Users\allal\Downloads\archive\olist_products_dataset.csv"
+		WITH (
+			FORMAT = 'CSV',
+			FIRSTROW = 2,
+			FIELDTERMINATOR = ',',
+			FIELDQUOTE = '"',
+			ROWTERMINATOR = '0x0a',
+			TABLOCK
+		);
+select * from olist_products
 
 
 truncate table olist_sellers
