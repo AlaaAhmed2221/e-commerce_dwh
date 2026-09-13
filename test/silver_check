@@ -1,0 +1,84 @@
+## 🧪 Silver Layer Data Quality Testing
+
+To ensure data integrity, cleanliness, and business logic validity before loading into the Gold Layer, the following test suites are executed:
+
+1. **Primary Key & Null Checks**: Ensures no duplicate primary keys or unexpected `NULL` values exist in core tables.
+2. **Text Formatting Tests**: Verifies that all string fields are trimmed, lower/upper-cased correctly, and null values replaced with `'n/a'`.
+3. **Business Logic Checks**: Tests calculated fields such as `is_valid_timeline`, `product_volume_cm3`, and `product_weight_kg`.
+4. **Referential Integrity**: Guarantees all foreign keys in transactional tables (`order_items`, `orders`) point to valid primary keys.
+5. **Row Count Reconciliation**: Ensures zero record loss during the ETL process from Bronze to Silver.
+
+------test_silver
+-- 1. Check Primary Key Uniqueness & Nulls in Silver Orders
+select order_id, count(*)
+from silver.olist_orders
+group by order_id
+having count(*) > 1 or order_id is null;
+
+-- 2. Check Primary Key Uniqueness & Nulls in Silver Customers
+select customer_id, count(*)
+from silver.olist_customers
+group by customer_id
+having count(*) > 1 or customer_id is null;
+
+-- 3. Check Primary Key Uniqueness & Nulls in Silver Products
+select product_id, count(*)
+from silver.olist_products
+group by product_id
+having count(*) > 1 or product_id is null;
+
+-- Check for trailing/leading spaces in customer cities
+select customer_city
+from silver.olist_customers
+where customer_city != trim(customer_city);
+
+-- Check if customer states are correctly capitalized (upper case and length = 2)
+select distinct customer_state
+from silver.olist_customers
+where len(customer_state) != 2 or customer_state != upper(customer_state);
+
+-- Check if review title/message nulls were properly handled
+select count(*) as missing_reviews_count
+from silver.olist_order_reviews
+where review_comment_title = 'n/a' or review_comment_message = 'n/a';
+
+-- 1. Verify invalid delivery timeline handling
+select count(*) as invalid_timelines_count
+from silver.olist_orders
+where is_valid_timeline = 0;
+
+-- 2. Check calculated delivery days logic (actual vs estimated)
+select order_id, actual_delivery_days, estimated_delivery_days, is_late_delivery
+from silver.olist_orders
+where actual_delivery_days < 0 or estimated_delivery_days < 0;
+
+-- 3. Check weight and volume conversions in products
+select product_id, product_weight_g, product_weight_kg, product_volume_cm3
+from silver.olist_products
+where (product_weight_g is not null and product_weight_kg is null)
+   or product_volume_cm3 <= 0;
+
+-- 1. Check if all Order Items link to a valid Order
+select count(*) as orphan_order_items
+from silver.olist_order_items oi
+left join silver.olist_orders o on oi.order_id = o.order_id
+where o.order_id is null;
+
+-- 2. Check if all Orders link to a valid Customer
+select count(*) as orphan_orders
+from silver.olist_orders o
+left join silver.olist_customers c on o.customer_id = c.customer_id
+where c.customer_id is null;
+
+-- 3. Check for Sellers with corrupt city names handled as 'n/a'
+select count(*) as cleaned_seller_cities
+from silver.olist_sellers
+where seller_city = 'n/a';
+
+select 'customers' as table_name, (select count(*) from bronze.olist_customers) as bronze_cnt, (select count(*) from silver.olist_customers) as silver_cnt
+union all
+select 'orders', (select count(*) from bronze.olist_orders), (select count(*) from silver.olist_orders)
+union all
+select 'products', (select count(*) from bronze.olist_products), (select count(*) from silver.olist_products)
+union all
+select 'order_items', (select count(*) from bronze.olist_order_items), (select count(*) from silver.olist_order_items);
