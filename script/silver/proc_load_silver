@@ -1,0 +1,276 @@
+create or alter procedure silver.load_silver as
+begin
+    declare @start_time datetime, @end_time datetime, @batch_start_time datetime, @batch_end_time datetime; 
+    begin try
+        set @batch_start_time = getdate();
+        print '================================================';
+        print 'Loading Silver Layer';
+        print '================================================';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_customers';
+        truncate table silver.olist_customers;
+        print '>> inserting data into: silver.olist_customers';
+        insert into silver.olist_customers(
+            customer_id,
+            customer_unique_id,
+            customer_zip_code_prefix,
+            customer_city,
+            customer_state 
+        )
+        select
+            trim(c.customer_id),
+            trim(c.customer_unique_id),
+            trim(c.customer_zip_code_prefix),
+            lower(trim(c.customer_city)),
+            upper(trim(c.customer_state))
+        from bronze.olist_customers c;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_geolocation';
+        truncate table silver.olist_geolocation;
+        print '>> inserting data into: silver.olist_geolocation';
+        insert into silver.olist_geolocation(
+            geolocation_zip_code_prefix,
+            geolocation_lat,
+            geolocation_lng,
+            geolocation_city,
+            geolocation_state
+        )
+        select
+            g.geolocation_zip_code_prefix,
+            g.geolocation_lat,
+            g.geolocation_lng,
+            lower(trim(g.geolocation_city)),
+            upper(trim(g.geolocation_state))
+        from bronze.olist_geolocation g;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_order_items';
+        truncate table silver.olist_order_items;
+        print '>> inserting data into: silver.olist_order_items';
+        insert into silver.olist_order_items(
+            order_id,
+            order_item_id,
+            product_id,
+            seller_id,
+            shipping_limit_date,
+            price,
+            freight_value
+        )
+        select
+            trim(o.order_id),
+            o.order_item_id,
+            trim(o.product_id),
+            trim(o.seller_id),
+            o.shipping_limit_date,
+            o.price,
+            o.freight_value
+        from bronze.olist_order_items o;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_order_payments';
+        truncate table silver.olist_order_payments;
+        print '>> inserting data into: silver.olist_order_payments';
+        insert into silver.olist_order_payments(
+            order_id,
+            payment_sequential,
+            payment_installments,
+            payment_type,
+            payment_value
+        )
+        select
+            trim(p.order_id),
+            p.payment_sequential,
+            p.payment_installments,
+            lower(trim(p.payment_type)),
+            p.payment_value
+        from bronze.olist_order_payments p;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_order_reviews';
+        truncate table silver.olist_order_reviews;
+        print '>> inserting data into: silver.olist_order_reviews';
+        insert into silver.olist_order_reviews(
+            review_id,
+            order_id,
+            review_score,
+            review_comment_title,
+            review_comment_message,
+            review_creation_date,
+            review_answer_timestamp
+        )
+        select
+            trim(r.review_id),
+            trim(r.order_id),
+            r.review_score,
+            case when trim(r.review_comment_title) is null or trim(r.review_comment_title) = '' then 'n/a' else trim(r.review_comment_title) end,
+            case when trim(r.review_comment_message) is null or trim(r.review_comment_message) = '' then 'n/a' else trim(r.review_comment_message) end,
+            r.review_creation_date,
+            r.review_answer_timestamp
+        from bronze.olist_order_reviews r;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_orders';
+        truncate table silver.olist_orders;
+        print '>> inserting data into: silver.olist_orders';
+        insert into silver.olist_orders(
+            order_id,
+            customer_id,
+            order_status,
+            order_purchase_timestamp,
+            order_approved_at,
+            order_delivered_carrier_date,
+            order_delivered_customer_date,
+            order_estimated_delivery_date,
+            is_valid_timeline,
+            is_late_delivery,
+            actual_delivery_days,
+            estimated_delivery_days
+        )
+        select 
+            trim(o.order_id),
+            trim(o.customer_id),
+            lower(trim(o.order_status)),
+            o.order_purchase_timestamp,
+            o.order_approved_at,
+            o.order_delivered_carrier_date,
+            o.order_delivered_customer_date,
+            o.order_estimated_delivery_date,
+            case
+                when o.order_approved_at < o.order_purchase_timestamp then 0
+                when o.order_delivered_carrier_date < o.order_approved_at then 0
+                when o.order_delivered_customer_date < o.order_delivered_carrier_date then 0
+                else 1 
+            end as is_valid_timeline,
+            case 
+                when o.order_delivered_customer_date is null then null
+                when o.order_delivered_customer_date > o.order_estimated_delivery_date then 1 
+                else 0 
+            end as is_late_delivery,
+            datediff(day, o.order_purchase_timestamp, o.order_delivered_customer_date) as actual_delivery_days,
+            datediff(day, o.order_purchase_timestamp, o.order_estimated_delivery_date) as estimated_delivery_days
+        from bronze.olist_orders o;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_products';
+        truncate table silver.olist_products;
+        print '>> inserting data into: silver.olist_products';
+        insert into silver.olist_products(
+            product_id,
+            product_category_name,
+            product_name_length,
+            product_description_length,
+            product_photos_qty,
+            product_weight_g,
+            product_length_cm,
+            product_height_cm,
+            product_width_cm,
+            product_volume_cm3,
+            product_weight_kg,
+            has_valid_dimensions
+        )
+        select 
+            trim(p.product_id),
+            coalesce(nullif(trim(p.product_category_name), ''), 'n/a'),
+            coalesce(p.product_name_lenght, 0),        -- تم تعديل اسم العمود لـ lenght ليطابق الـ bronze
+            coalesce(p.product_description_lenght, 0), -- تم تعديل اسم العمود لـ lenght ليطابق الـ bronze
+            coalesce(p.product_photos_qty, 0),
+            case when p.product_weight_g > 0 then p.product_weight_g else null end,
+            case when p.product_length_cm > 0 then p.product_length_cm else null end,
+            case when p.product_height_cm > 0 then p.product_height_cm else null end,
+            case when p.product_width_cm > 0 then p.product_width_cm else null end,
+            case 
+                when p.product_length_cm > 0 and p.product_width_cm > 0 and p.product_height_cm > 0 
+                then cast(p.product_length_cm as bigint) * p.product_width_cm * p.product_height_cm
+                else null 
+            end,
+            case 
+                when p.product_weight_g > 0 then cast(p.product_weight_g as decimal(10, 3)) / 1000.0 
+                else null 
+            end,
+            case 
+                when p.product_weight_g > 0 and p.product_length_cm > 0 and p.product_height_cm > 0 and p.product_width_cm > 0 then 1
+                else 0 
+            end
+        from bronze.olist_products p;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.olist_sellers';
+        truncate table silver.olist_sellers;
+        print '>> inserting data into: silver.olist_sellers';
+        insert into silver.olist_sellers (
+            seller_id,
+            seller_zip_code_prefix,
+            seller_city,
+            seller_state
+        )
+        select 
+            trim(seller_id),
+            trim(seller_zip_code_prefix),
+            case
+                when seller_city is null then 'n/a'
+                when try_cast(trim(seller_city) as int) is not null then 'n/a' 
+                when trim(seller_city) = '' then 'n/a'
+                else lower(trim(seller_city))
+            end,
+            upper(trim(seller_state))
+        from bronze.olist_sellers;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @start_time = getdate();
+        print '>>Truncating Table: silver.product_category_name_translation';
+        truncate table silver.product_category_name_translation;
+        print '>> inserting data into: silver.product_category_name_translation';
+        insert into silver.product_category_name_translation(
+            product_category_name,
+            product_category_name_translation
+        )
+        select 
+            trim(t.product_category_name),
+            trim(t.product_category_name_translation)
+        from bronze.product_category_name_translation t;
+        set @end_time = getdate();
+        print '>> Load Duration: ' + cast(datediff(second, @start_time, @end_time) as nvarchar) + ' seconds';
+        print '>> -------------';
+
+        set @batch_end_time = getdate();
+        print '==========================================';
+        print 'Loading Silver Layer is Completed';
+        print ' Total Load Duration: ' + cast(datediff(second, @batch_start_time, @batch_end_time) as nvarchar) + ' seconds';
+        print '==========================================';
+        
+    end try
+    begin catch
+        print '==========================================';
+        print 'ERROR OCCURRED DURING LOADING SILVER LAYER';
+        print 'Error Message: ' + error_message();
+        print 'Error Number: ' + cast(error_number() as nvarchar);
+        print 'Error State: ' + cast(error_state() as nvarchar);
+        print '==========================================';
+    end catch
+end
+go
