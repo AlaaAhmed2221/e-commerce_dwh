@@ -1,1 +1,210 @@
 
+IF OBJECT_ID('gold.dim_customers', 'v') IS NOT NULL
+DROP VIEW gold.dim_customers;
+GO
+
+create view gold.dim_customers as
+WITH geo AS
+(
+    SELECT
+        geolocation_zip_code_prefix,
+        AVG(geolocation_lat) AS geolocation_lat,
+        AVG(geolocation_lng) AS geolocation_lng
+    FROM silver.olist_geolocation
+    GROUP BY geolocation_zip_code_prefix
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY c.customer_id) AS customer_key,
+    c.customer_id,
+    c.customer_unique_id,
+    c.customer_zip_code_prefix,
+    c.customer_city,
+    c.customer_state,
+    g.geolocation_lat,
+    g.geolocation_lng
+FROM silver.olist_customers c
+LEFT JOIN geo g
+    ON g.geolocation_zip_code_prefix = 
+       TRY_CONVERT(int, c.customer_zip_code_prefix);
+Go
+
+
+IF OBJECT_ID('gold.dim_products', 'v') IS NOT NULL
+DROP VIEW gold.dim_products;
+GO
+
+create view gold.dim_products as
+select
+ROW_NUMBER() OVER (ORDER BY product_id) AS product_key,
+p.product_id,
+p.product_category_name,
+t.product_category_name_translation,
+p.product_name_length,
+p.product_description_length,
+p.product_photos_qty,
+p.product_weight_g,
+p.product_weight_kg,
+p.product_height_cm,
+p.product_length_cm,
+p.product_width_cm,
+p.product_volume_cm3,
+p.has_valid_dimensions
+from silver.olist_products p
+left join silver.product_category_name_translation t
+on p.product_category_name=t.product_category_name
+GO
+
+IF OBJECT_ID('gold.dim_date', 'v') IS NOT NULL
+DROP VIEW gold.dim_date;
+GO
+
+CREATE VIEW gold.dim_date AS
+WITH AllDates AS (
+
+    SELECT CAST(order_purchase_timestamp AS DATE) AS full_date FROM silver.olist_orders WHERE order_purchase_timestamp IS NOT NULL
+    UNION
+    SELECT CAST(order_approved_at AS DATE) FROM silver.olist_orders WHERE order_approved_at IS NOT NULL
+    UNION
+    SELECT CAST(order_delivered_carrier_date AS DATE) FROM silver.olist_orders WHERE order_delivered_carrier_date IS NOT NULL
+    UNION
+    SELECT CAST(order_delivered_customer_date AS DATE) FROM silver.olist_orders WHERE order_delivered_customer_date IS NOT NULL
+    UNION
+    SELECT CAST(order_estimated_delivery_date AS DATE) FROM silver.olist_orders WHERE order_estimated_delivery_date IS NOT NULL
+    UNION
+    SELECT CAST(shipping_limit_date AS DATE) FROM silver.olist_order_items WHERE shipping_limit_date IS NOT NULL
+    UNION
+    SELECT CAST(review_creation_date AS DATE) FROM silver.olist_order_reviews WHERE review_creation_date IS NOT NULL
+)
+SELECT 
+    CAST(FORMAT(full_date, 'yyyyMMdd') AS INT) AS date_key,
+    full_date,
+    YEAR(full_date) AS year,
+    DATEPART(QUARTER, full_date) AS quarter,
+    'Q' + CAST(DATEPART(QUARTER, full_date) AS VARCHAR(1)) AS quarter_name,
+    MONTH(full_date) AS month,
+    DATENAME(MONTH, full_date) AS month_name,
+    LEFT(DATENAME(MONTH, full_date), 3) AS month_name_short,
+    DAY(full_date) AS day_of_month,
+    DATEPART(WEEKDAY, full_date) AS day_of_week,
+    DATENAME(WEEKDAY, full_date) AS day_name,
+    LEFT(DATENAME(WEEKDAY, full_date), 3) AS day_name_short,
+    DATEPART(WEEK, full_date) AS week_of_year,
+    CASE WHEN DATENAME(WEEKDAY, full_date) IN ('Saturday', 'Sunday') THEN 1 ELSE 0 END AS is_weekend,
+    CASE WHEN EOMONTH(full_date) = full_date THEN 1 ELSE 0 END AS is_month_end
+FROM AllDates;
+GO
+
+IF OBJECT_ID('gold.dim_sellers', 'v') IS NOT NULL
+    DROP VIEW gold.dim_sellers;
+GO
+
+CREATE VIEW gold.dim_sellers AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY seller_id) AS seller_key,
+    seller_id,
+    seller_zip_code_prefix,
+    seller_city,
+    seller_state
+FROM silver.olist_sellers;
+GO
+
+
+
+IF OBJECT_ID('gold.fact_sales', 'v') IS NOT NULL
+DROP VIEW gold.fact_sales;
+GO
+
+create view gold.fact_sales as
+select 
+
+s.seller_key,
+p.product_key,
+c.customer_key,
+oi.order_id,
+oi.order_item_id,
+CAST(FORMAT(oi.shipping_limit_date, 'yyyyMMdd') AS INT) AS shipping_limit_date_key,
+
+s.seller_zip_code_prefix,
+s.seller_city,
+s.seller_state,
+
+oi.price,
+oi.freight_value,
+oi.shipping_limit_date
+from silver.olist_order_items oi
+left join silver.olist_orders oo
+on oo.order_id=oi.order_id
+
+left join gold.dim_customers c
+on c.customer_id=oo.customer_id
+
+left join gold.dim_products p
+on p.product_id=oi.product_id
+
+LEFT JOIN gold.dim_sellers s
+    ON s.seller_id = oi.seller_id;
+GO
+
+
+
+
+
+IF OBJECT_ID('gold.fact_payments', 'v') IS NOT NULL
+DROP VIEW gold.fact_payments;
+GO
+
+create view gold.fact_payments as
+select
+ROW_NUMBER() OVER (ORDER BY p.order_id,p.payment_sequential) AS payment_key,
+c.customer_key,
+p.order_id,
+CAST(FORMAT(o.order_purchase_timestamp, 'yyyyMMdd') AS INT) AS purchase_date_key,
+CAST(FORMAT(o.order_approved_at, 'yyyyMMdd') AS INT) AS approved_date_key,
+CAST(FORMAT(o.order_delivered_customer_date, 'yyyyMMdd') AS INT) AS delivered_customer_date_key,
+
+p.payment_installments,
+p.payment_sequential,
+p.payment_type,
+p.payment_value,
+o.order_status,
+o.order_purchase_timestamp,
+o.order_approved_at,
+o.order_delivered_carrier_date,
+o.order_delivered_customer_date,
+o.estimated_delivery_days,
+o.is_late_delivery,
+o.is_valid_timeline
+from silver.olist_order_payments p
+left join silver.olist_orders o
+on p.order_id=o.order_id
+left join gold.dim_customers c
+on c.customer_id=o.customer_id
+GO
+
+
+IF OBJECT_ID('gold.fact_reviews', 'v') IS NOT NULL
+DROP VIEW gold.fact_reviews;
+GO
+
+create view gold.fact_reviews as
+select
+ROW_NUMBER() OVER (ORDER BY r.review_id) AS review_key,
+
+c.customer_key,
+r.review_id,
+o.order_id,
+CAST(FORMAT(r.review_creation_date, 'yyyyMMdd') AS INT) AS review_creation_date_key,
+CAST(FORMAT(r.review_answer_timestamp, 'yyyyMMdd') AS INT) AS review_answer_date_key,
+r.review_score,
+r.review_comment_message,
+r.review_comment_title,
+r.review_creation_date,
+r.review_answer_timestamp,
+o.is_late_delivery
+from silver.olist_order_reviews r
+left join silver.olist_orders o
+on r.order_id=o.order_id
+left join gold.dim_customers c
+on c.customer_id=o.customer_id
+
+GO
