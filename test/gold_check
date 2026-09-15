@@ -1,0 +1,15 @@
+SELECT order_id, order_item_id, COUNT(*)
+FROM gold.fact_sales
+GROUP BY order_id, order_item_id
+HAVING COUNT(*) > 1;
+
+SELECT order_id, payment_sequential, COUNT(*)
+FROM gold.fact_payments
+GROUP BY order_id, payment_sequential
+HAVING COUNT(*) > 1;
+
+
+SELECT review_id, COUNT(*)
+FROM gold.fact_reviews
+GROUP BY review_id
+HAVING COUNT(*) > 1;
