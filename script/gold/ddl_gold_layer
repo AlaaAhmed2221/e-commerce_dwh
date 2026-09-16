@@ -25,7 +25,9 @@ SELECT
 FROM silver.olist_customers c
 LEFT JOIN geo g
     ON g.geolocation_zip_code_prefix = 
-       TRY_CONVERT(int, c.customer_zip_code_prefix);
+        c.customer_zip_code_prefix
+
+
 Go
 
 
@@ -116,7 +118,7 @@ GO
 
 create view gold.fact_sales as
 select 
-
+ROW_NUMBER() OVER (ORDER BY oi.order_id, oi.order_item_id) AS sales_key,
 s.seller_key,
 p.product_key,
 c.customer_key,
@@ -208,3 +210,4 @@ left join gold.dim_customers c
 on c.customer_id=o.customer_id
 
 GO
+
